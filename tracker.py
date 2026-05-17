@@ -1,9 +1,12 @@
-import requests
-from bs4 import BeautifulSoup
 import os
-import re
+import time
+import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-# Standard OPL search URL targeting PS5 games on order
 URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
 TRACKER_FILE = "seen_games.txt"
 
@@ -19,42 +22,43 @@ def send_telegram_message(message):
             print(f"Failed to send Telegram message: {e}")
 
 def get_on_order_games():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
+    chrome_options = Options()
+    chrome_options.add_argument("--headless") # Runs completely background in GitHub
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+    driver = webdriver.Chrome(options=chrome_options)
+    titles = set()
+
     try:
-        response = requests.get(URL, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        driver.get(URL)
+        # Give the heavy JavaScript layout up to 20 seconds to load the actual titles
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_NAME, "a.cp-title-link, .cp-title, [data-test-id='title']"))
+        )
+        time.sleep(3) # Safe buffer for text rendering
         
-        titles = set()
-        
-        # Strategy A: Target standard title link elements if present
-        for link in soup.select("a[href*='/v2/v2/'], .cp-title, a.cp-title-link"):
-            text = link.get_text().strip()
-            if text and not any(x in text.lower() for x in ['shelf', 'hold', 'log in', 'search']):
+        # Grab all potential elements displaying game names
+        elements = driver.find_elements(By.CSS_NAME, "a.cp-title-link, .cp-title, [data-test-id='title']")
+        for el in elements:
+            text = el.text.strip()
+            if text and len(text) > 2 and not any(x in text.lower() for x in ['hold', 'shelf', 'log in']):
                 titles.add(text)
                 
-        # Strategy B: Fallback parsing across the entire page body text layout
-        # (Grabs titles listed right next to format markers)
-        page_text = soup.get_text()
-        raw_matches = re.findall(r'([A-Za-z0-9\s™®©\-\:\!\'\.]+)\,\s*Video\s*Game', page_text)
-        for match in raw_matches:
-            clean_title = match.strip().split('\n')[-1].strip()
-            if len(clean_title) > 2 and not any(x in clean_title.lower() for x in ['skip', 'filter', 'cart']):
-                titles.add(clean_title)
-                
-        return titles
     except Exception as e:
-        print(f"Error accessing library webpage: {e}")
-        return set()
+        print(f"Browser automation timed out or encountered an error: {e}")
+    finally:
+        driver.quit()
+        
+    return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the library catalogue layout.")
+    print(f"Successfully tracked {len(current_games)} titles from the live browser environment.")
     
     if not current_games:
-        print("Could not parse records from the current page content.")
+        print("Could not pull records via browser. Page layer did not render.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -68,14 +72,13 @@ def run():
     if new_games:
         message = "🚨 New PS5 Game(s) On Order at OPL!:\n\n" + "\n".join(f"• {game}" for game in new_games)
         send_telegram_message(message)
-        print(f"Sent Telegram alert for: {new_games}")
+        print(f"Sent Telegram notification for: {new_games}")
         
-        # Append found titles to the baseline memory registry
         with open(TRACKER_FILE, "a", encoding="utf-8") as f:
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Database alignment accurate. No new pre-orders posted.")
+        print("Database sync complete. No new pre-orders listed.")
 
 if __name__ == "__main__":
     run()
