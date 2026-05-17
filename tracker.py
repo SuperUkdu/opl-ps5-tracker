@@ -1,8 +1,9 @@
 import os
 import requests
+import xml.etree.ElementTree as ET
 
-# Directly targets OPL's underlying public catalog backend search system
-API_URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
+# Native BiblioCommons RSS data feed targeting OPL's PS5 "On Order" catalog list
+FEED_URL = "https://ottawa.bibliocommons.com/search.rss?t=smart&q=formatcode%3A%28VIDEO_GAME%29+AND+%22playstation+5%22+AND+oo%3A%28true%29"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -18,36 +19,34 @@ def send_telegram_message(message):
 
 def get_on_order_games():
     titles = set()
-    # Masking the request with a standard browser header to pull raw page script components
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) OPL-Game-Tracker-Bot'
     }
     try:
-        response = requests.get(API_URL, headers=headers, timeout=15)
-        text_content = response.text
-        
-        # OPL embeds data records inside a script tag block named 'pageData' or 'props' 
-        # We can extract text chunks directly via simple string isolation without parsing HTML blocks
-        chunks = text_content.split('"title":"')
-        for chunk in chunks[1:]:
-            title = chunk.split('"')[0].strip()
-            # Clean out any catalog interface labels or duplicates
-            if title and len(title) > 2 and not any(x in title.lower() for x in ['search', 'hold', 'log in', 'cancel']):
-                # Clean up escaped unicode spaces if present
-                title = title.replace('\\u0020', ' ').replace('\\/','/')
-                titles.add(title)
+        response = requests.get(FEED_URL, headers=headers, timeout=15)
+        if response.status_code == 200:
+            # Parse the raw feed text data directly using Python's built-in fast XML processor
+            root = ET.fromstring(response.content)
+            for item in root.findall('.//item'):
+                title_elem = item.find('title')
+                if title_elem is not None and title_elem.text:
+                    title_text = title_elem.text.strip()
+                    # Drop the generic feed header name if it loops into the item layout
+                    if not title_text.startswith("Ottawa Public Library"):
+                        titles.add(title_text)
+        else:
+            print(f"Library feed responded with status code: {response.status_code}")
     except Exception as e:
-        print(f"Error connecting to OPL data layer: {e}")
+        print(f"Error accessing public library feed: {e}")
         
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the data layer.")
+    print(f"Successfully tracked {len(current_games)} titles from the native library feed.")
     
     if not current_games:
-        print("Data layer check failed or returned an empty payload.")
+        print("The library data feed is currently empty or pending update.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -67,7 +66,7 @@ def run():
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Daily sync complete. No new items listed.")
+        print("Daily sync verified. No new arrivals posted to feed.")
 
 if __name__ == "__main__":
     run()
