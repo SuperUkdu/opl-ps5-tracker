@@ -1,8 +1,7 @@
 import os
 import time
 import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -22,37 +21,38 @@ def send_telegram_message(message):
             print(f"Failed to send Telegram message: {e}")
 
 def get_on_order_games():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless") # Runs in the background on GitHub
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-    driver = webdriver.Chrome(options=chrome_options)
+    options = uc.ChromeOptions()
+    options.add_argument("--headless") # Runs silently in the background
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
     titles = set()
-
+    
     try:
+        # Initialize the stealth undetected chrome driver
+        driver = uc.Chrome(options=options)
         driver.get(URL)
         
-        # Corrected to By.CSS_SELECTOR
-        WebDriverWait(driver, 20).until(
+        # Give the heavy page up to 25 seconds to render past protection screens
+        WebDriverWait(driver, 25).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']"))
         )
-        time.sleep(5) # Give it an extra moment to fully render all titles
+        time.sleep(5) # Safe buffer for text synchronization
         
-        # Extract the text from the elements
         elements = driver.find_elements(By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']")
         for el in elements:
             text = el.text.strip()
-            # Clean out common interface text clutter
             if text and len(text) > 2 and not any(x in text.lower() for x in ['hold', 'shelf', 'log in', 'search', 'filter']):
                 titles.add(text)
                 
-    except Exception as e:
-        print(f"Browser automation timed out or encountered an error: {e}")
-    finally:
         driver.quit()
-        
+    except Exception as e:
+        print(f"Stealth browser encountered a layout delay or timeout: {e}")
+        try:
+            driver.quit()
+        except:
+            pass
+            
     return titles
 
 def run():
