@@ -23,27 +23,29 @@ def send_telegram_message(message):
 
 def get_on_order_games():
     chrome_options = Options()
-    chrome_options.add_argument("--headless") # Runs completely background in GitHub
+    chrome_options.add_argument("--headless") # Runs in the background on GitHub
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     driver = webdriver.Chrome(options=chrome_options)
     titles = set()
 
     try:
         driver.get(URL)
-        # Give the heavy JavaScript layout up to 20 seconds to load the actual titles
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_NAME, "a.cp-title-link, .cp-title, [data-test-id='title']"))
-        )
-        time.sleep(3) # Safe buffer for text rendering
         
-        # Grab all potential elements displaying game names
-        elements = driver.find_elements(By.CSS_NAME, "a.cp-title-link, .cp-title, [data-test-id='title']")
+        # Corrected to By.CSS_SELECTOR
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']"))
+        )
+        time.sleep(5) # Give it an extra moment to fully render all titles
+        
+        # Extract the text from the elements
+        elements = driver.find_elements(By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']")
         for el in elements:
             text = el.text.strip()
-            if text and len(text) > 2 and not any(x in text.lower() for x in ['hold', 'shelf', 'log in']):
+            # Clean out common interface text clutter
+            if text and len(text) > 2 and not any(x in text.lower() for x in ['hold', 'shelf', 'log in', 'search', 'filter']):
                 titles.add(text)
                 
     except Exception as e:
