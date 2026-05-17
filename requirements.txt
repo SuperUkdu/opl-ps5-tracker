@@ -1,2 +1,2 @@
-undetected-chromedriver
 requests
+beautifulsoup4
