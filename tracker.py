@@ -1,8 +1,9 @@
 import os
 import requests
+import re
+import json
 
-# Native BiblioCommons RSS data feed targeting OPL's PS5 "On Order" catalog list
-FEED_URL = "https://ottawa.bibliocommons.com/search.rss?t=smart&q=formatcode%3A%28VIDEO_GAME%29+AND+%22playstation+5%22+AND+oo%3A%28true%29"
+URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -19,39 +20,48 @@ def send_telegram_message(message):
 def get_on_order_games():
     titles = set()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) OPL-Game-Tracker-Bot'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
     }
     try:
-        response = requests.get(FEED_URL, headers=headers, timeout=15)
-        if response.status_code == 200:
-            # Treat the response as raw text to completely ignore XML formatting errors
-            text_data = response.text
+        response = requests.get(URL, headers=headers, timeout=15)
+        html = response.text
+        
+        # Locate the exact raw bootstrap data object BiblioCommons uses to fill the page
+        match = re.search(r'window\.__PRELOADED_STATE__\s*=\s*(\{.*?\});', html)
+        if match:
+            state_json = json.loads(match.group(1))
+            # Drill straight down into the catalog entities dictionary
+            entities = state_json.get("entities", {})
+            bibs = entities.get("bibs", {})
             
-            # Split the text by the standard RSS title tag
-            chunks = text_data.split('<title>')
-            for chunk in chunks[1:]:
-                if '</title>' in chunk:
-                    title_text = chunk.split('</title>')[0].strip()
+            for bib_id, bib_data in bibs.items():
+                title = bib_data.get("title")
+                format_code = bib_data.get("format", {}).get("code", "")
+                
+                # Double check that it's a video game format item
+                if title and "VIDEO_GAME" in format_code.upper():
+                    titles.add(title.strip())
                     
-                    # Clean up common web encoding fragments if they appear in titles
-                    title_text = title_text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        # Fallback regex extraction if the JSON layout structure shifts slightly
+        if not titles:
+            raw_titles = re.findall(r'"title"\s*:\s*"([^"]+)"', html)
+            for t in raw_titles:
+                if not any(x in t.lower() for x in ['search', 'hold', 'log in', 'ottawa']):
+                    titles.add(t.strip())
                     
-                    # Ignore the overall main RSS channel header titles
-                    if title_text and not any(x in title_text.lower() for x in ['ottawa public library', 'search results']):
-                        titles.add(title_text)
-        else:
-            print(f"Library feed responded with status code: {response.status_code}")
     except Exception as e:
-        print(f"Error accessing public library feed text: {e}")
+        print(f"Error extracting data block: {e}")
         
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the native library feed text.")
+    print(f"Successfully tracked {len(current_games)} titles from the layout core.")
     
     if not current_games:
-        print("The library data feed text processing returned zero entries.")
+        print("Data core parsing returned zero entries. The layout format may have changed.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -71,7 +81,7 @@ def run():
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Daily sync verified. No new arrivals posted to feed.")
+        print("Daily sync completed. No new pre-orders found.")
 
 if __name__ == "__main__":
     run()
