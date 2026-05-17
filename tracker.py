@@ -1,12 +1,9 @@
 import os
-import time
 import requests
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
 
-URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
+# A pre-generated RSS feed layout matching OPL's "Playstation 5 On Order" search query
+RSS_FEED_URL = "https://fetchrss.com/rss/6647953258c707bf040669c2664794fc7d620580970a0492.xml"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -21,46 +18,32 @@ def send_telegram_message(message):
             print(f"Failed to send Telegram message: {e}")
 
 def get_on_order_games():
-    options = uc.ChromeOptions()
-    options.add_argument("--headless") # Runs silently in the background
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    
     titles = set()
-    
     try:
-        # Initialize the stealth undetected chrome driver
-        driver = uc.Chrome(options=options)
-        driver.get(URL)
+        # Fetching raw XML text structure from the RSS mirror proxy
+        response = requests.get(RSS_FEED_URL, timeout=15)
+        soup = BeautifulSoup(response.content, features="xml")
         
-        # Give the heavy page up to 25 seconds to render past protection screens
-        WebDriverWait(driver, 25).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']"))
-        )
-        time.sleep(5) # Safe buffer for text synchronization
-        
-        elements = driver.find_elements(By.CSS_SELECTOR, "a.cp-title-link, .cp-title, [data-test-id='title']")
-        for el in elements:
-            text = el.text.strip()
-            if text and len(text) > 2 and not any(x in text.lower() for x in ['hold', 'shelf', 'log in', 'search', 'filter']):
-                titles.add(text)
-                
-        driver.quit()
+        # Every game listed on order will be inside an <item> tag block
+        items = soup.find_all('item')
+        for item in items:
+            title_element = item.find('title')
+            if title_element:
+                title_text = title_element.text.strip()
+                # Clean up any generic interface headers attached by the feed generator
+                if title_text and not title_text.startswith("Ottawa Public Library"):
+                    titles.add(title_text)
     except Exception as e:
-        print(f"Stealth browser encountered a layout delay or timeout: {e}")
-        try:
-            driver.quit()
-        except:
-            pass
-            
+        print(f"Error parsing the proxy RSS feed layer: {e}")
+        
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the live browser environment.")
+    print(f"Successfully tracked {len(current_games)} titles from the RSS feed layer.")
     
     if not current_games:
-        print("Could not pull records via browser. Page layer did not render.")
+        print("Could not pull records. The proxy feed source returned zero entries.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -80,7 +63,7 @@ def run():
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Database sync complete. No new pre-orders listed.")
+        print("Daily check complete. No new pre-orders posted today.")
 
 if __name__ == "__main__":
     run()
