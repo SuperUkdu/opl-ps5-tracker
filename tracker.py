@@ -2,7 +2,7 @@ import os
 import requests
 
 # Paste your unique Google Web App URL here inside the quotes
-GOOGLE_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbxL3AXVZP9e3Drv1aL9dRGNoMNWC52pYVuiNMPolbCuvVS3Rbw51zs85y5sNUtmkRM/exec"
+GOOGLE_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbxuIrFSSTrl-OlOCvhEut97qt0LJxImpH9jJ2NaiHwelb9w2qW3T1b1Kbccxg5Mvrzz/exec"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
