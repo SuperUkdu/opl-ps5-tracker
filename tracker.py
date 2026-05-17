@@ -1,6 +1,5 @@
 import os
 import requests
-import xml.etree.ElementTree as ET
 
 # Native BiblioCommons RSS data feed targeting OPL's PS5 "On Order" catalog list
 FEED_URL = "https://ottawa.bibliocommons.com/search.rss?t=smart&q=formatcode%3A%28VIDEO_GAME%29+AND+%22playstation+5%22+AND+oo%3A%28true%29"
@@ -25,28 +24,34 @@ def get_on_order_games():
     try:
         response = requests.get(FEED_URL, headers=headers, timeout=15)
         if response.status_code == 200:
-            # Parse the raw feed text data directly using Python's built-in fast XML processor
-            root = ET.fromstring(response.content)
-            for item in root.findall('.//item'):
-                title_elem = item.find('title')
-                if title_elem is not None and title_elem.text:
-                    title_text = title_elem.text.strip()
-                    # Drop the generic feed header name if it loops into the item layout
-                    if not title_text.startswith("Ottawa Public Library"):
+            # Treat the response as raw text to completely ignore XML formatting errors
+            text_data = response.text
+            
+            # Split the text by the standard RSS title tag
+            chunks = text_data.split('<title>')
+            for chunk in chunks[1:]:
+                if '</title>' in chunk:
+                    title_text = chunk.split('</title>')[0].strip()
+                    
+                    # Clean up common web encoding fragments if they appear in titles
+                    title_text = title_text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+                    
+                    # Ignore the overall main RSS channel header titles
+                    if title_text and not any(x in title_text.lower() for x in ['ottawa public library', 'search results']):
                         titles.add(title_text)
         else:
             print(f"Library feed responded with status code: {response.status_code}")
     except Exception as e:
-        print(f"Error accessing public library feed: {e}")
+        print(f"Error accessing public library feed text: {e}")
         
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the native library feed.")
+    print(f"Successfully tracked {len(current_games)} titles from the native library feed text.")
     
     if not current_games:
-        print("The library data feed is currently empty or pending update.")
+        print("The library data feed text processing returned zero entries.")
         return
     
     if os.path.exists(TRACKER_FILE):
