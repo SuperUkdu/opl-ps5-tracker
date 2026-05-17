@@ -1,9 +1,8 @@
 import os
 import requests
-from bs4 import BeautifulSoup
 
-# A pre-generated RSS feed layout matching OPL's "Playstation 5 On Order" search query
-RSS_FEED_URL = "https://fetchrss.com/rss/6647953258c707bf040669c2664794fc7d620580970a0492.xml"
+# Directly targets OPL's underlying public catalog backend search system
+API_URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -19,31 +18,36 @@ def send_telegram_message(message):
 
 def get_on_order_games():
     titles = set()
+    # Masking the request with a standard browser header to pull raw page script components
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    }
     try:
-        # Fetching raw XML text structure from the RSS mirror proxy
-        response = requests.get(RSS_FEED_URL, timeout=15)
-        soup = BeautifulSoup(response.content, features="xml")
+        response = requests.get(API_URL, headers=headers, timeout=15)
+        text_content = response.text
         
-        # Every game listed on order will be inside an <item> tag block
-        items = soup.find_all('item')
-        for item in items:
-            title_element = item.find('title')
-            if title_element:
-                title_text = title_element.text.strip()
-                # Clean up any generic interface headers attached by the feed generator
-                if title_text and not title_text.startswith("Ottawa Public Library"):
-                    titles.add(title_text)
+        # OPL embeds data records inside a script tag block named 'pageData' or 'props' 
+        # We can extract text chunks directly via simple string isolation without parsing HTML blocks
+        chunks = text_content.split('"title":"')
+        for chunk in chunks[1:]:
+            title = chunk.split('"')[0].strip()
+            # Clean out any catalog interface labels or duplicates
+            if title and len(title) > 2 and not any(x in title.lower() for x in ['search', 'hold', 'log in', 'cancel']):
+                # Clean up escaped unicode spaces if present
+                title = title.replace('\\u0020', ' ').replace('\\/','/')
+                titles.add(title)
     except Exception as e:
-        print(f"Error parsing the proxy RSS feed layer: {e}")
+        print(f"Error connecting to OPL data layer: {e}")
         
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the RSS feed layer.")
+    print(f"Successfully tracked {len(current_games)} titles from the data layer.")
     
     if not current_games:
-        print("Could not pull records. The proxy feed source returned zero entries.")
+        print("Data layer check failed or returned an empty payload.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -63,7 +67,7 @@ def run():
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Daily check complete. No new pre-orders posted today.")
+        print("Daily sync complete. No new items listed.")
 
 if __name__ == "__main__":
     run()
