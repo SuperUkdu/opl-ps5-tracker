@@ -1,9 +1,8 @@
 import os
 import requests
-import re
-import json
 
-URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
+# Paste your unique Google Web App URL here inside the quotes
+GOOGLE_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbzzzmALNFMvpGVNiCldLfCpkB8DVm-Afn5-1b9EQcZYFekNqDQMTVuoE4QN-B2IPNa8/exec"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -19,49 +18,27 @@ def send_telegram_message(message):
 
 def get_on_order_games():
     titles = set()
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-    }
     try:
-        response = requests.get(URL, headers=headers, timeout=15)
-        html = response.text
-        
-        # Locate the exact raw bootstrap data object BiblioCommons uses to fill the page
-        match = re.search(r'window\.__PRELOADED_STATE__\s*=\s*(\{.*?\});', html)
-        if match:
-            state_json = json.loads(match.group(1))
-            # Drill straight down into the catalog entities dictionary
-            entities = state_json.get("entities", {})
-            bibs = entities.get("bibs", {})
-            
-            for bib_id, bib_data in bibs.items():
-                title = bib_data.get("title")
-                format_code = bib_data.get("format", {}).get("code", "")
-                
-                # Double check that it's a video game format item
-                if title and "VIDEO_GAME" in format_code.upper():
-                    titles.add(title.strip())
-                    
-        # Fallback regex extraction if the JSON layout structure shifts slightly
-        if not titles:
-            raw_titles = re.findall(r'"title"\s*:\s*"([^"]+)"', html)
-            for t in raw_titles:
-                if not any(x in t.lower() for x in ['search', 'hold', 'log in', 'ottawa']):
-                    titles.add(t.strip())
-                    
+        response = requests.get(GOOGLE_BRIDGE_URL, timeout=15)
+        if response.status_code == 200 and response.text != "Error":
+            # The Google app returns a clean list separated by line breaks
+            lines = response.text.split("\n")
+            for line in lines:
+                if line.strip():
+                    titles.add(line.strip())
+        else:
+            print("Google bridge server encountered an error parsing the page text.")
     except Exception as e:
-        print(f"Error extracting data block: {e}")
+        print(f"Failed to communicate with Google data bridge: {e}")
         
     return titles
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully tracked {len(current_games)} titles from the layout core.")
+    print(f"Successfully tracked {len(current_games)} titles from the secure data bridge.")
     
     if not current_games:
-        print("Data core parsing returned zero entries. The layout format may have changed.")
+        print("Data package empty. No current pre-orders found.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -81,7 +58,7 @@ def run():
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Daily sync completed. No new pre-orders found.")
+        print("Daily check complete. System fully synchronized.")
 
 if __name__ == "__main__":
     run()
