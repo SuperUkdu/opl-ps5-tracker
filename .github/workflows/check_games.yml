@@ -1,7 +1,7 @@
 name: Check OPL PS5 Games
 on:
   schedule:
-    - cron: '0 * * * *' # Automatically runs at the top of every single hour
+  - cron: '0 14 * * *' # Automatically runs once a day at 10:00 AM EST
   workflow_dispatch:      # Gives you a button to test it manually anytime
 
 permissions:
