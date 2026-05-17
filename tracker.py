@@ -1,8 +1,10 @@
 import requests
+from bs4 import BeautifulSoup
 import os
+import re
 
-# Directly targeting the OPL BiblioCommons data API feed for PS5 games on order
-API_URL = "https://gateway.bibliocommons.com/v2/libraries/ottawa/results?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22%20f_availability%3A%28on_order%29&searchType=smart"
+# Standard OPL search URL targeting PS5 games on order
+URL = "https://ottawa.bibliocommons.com/v2/search?query=formatcode%3A%28VIDEO_GAME%29%20%22playstation%205%22&searchType=smart&f_availability=on_order"
 TRACKER_FILE = "seen_games.txt"
 
 def send_telegram_message(message):
@@ -18,34 +20,41 @@ def send_telegram_message(message):
 
 def get_on_order_games():
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Accept': 'application/json',
-        'X-Client-Id': '8a9ad0b3-ecae-4f9a-8b83-ffdf49ec1c12' # Standard BiblioCommons app key
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
     }
     try:
-        response = requests.get(API_URL, headers=headers, timeout=15)
-        data = response.json()
+        response = requests.get(URL, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Dig into the data layout to extract raw titles
-        titles = []
-        results = data.get("results", [])
-        for item in results:
-            bib = item.get("bib", {})
-            title = bib.get("title")
-            if title:
-                titles.append(title.strip())
+        titles = set()
+        
+        # Strategy A: Target standard title link elements if present
+        for link in soup.select("a[href*='/v2/v2/'], .cp-title, a.cp-title-link"):
+            text = link.get_text().strip()
+            if text and not any(x in text.lower() for x in ['shelf', 'hold', 'log in', 'search']):
+                titles.add(text)
                 
-        return set(titles)
+        # Strategy B: Fallback parsing across the entire page body text layout
+        # (Grabs titles listed right next to format markers)
+        page_text = soup.get_text()
+        raw_matches = re.findall(r'([A-Za-z0-9\s™®©\-\:\!\'\.]+)\,\s*Video\s*Game', page_text)
+        for match in raw_matches:
+            clean_title = match.strip().split('\n')[-1].strip()
+            if len(clean_title) > 2 and not any(x in clean_title.lower() for x in ['skip', 'filter', 'cart']):
+                titles.add(clean_title)
+                
+        return titles
     except Exception as e:
-        print(f"Error calling OPL catalog backend: {e}")
+        print(f"Error accessing library webpage: {e}")
         return set()
 
 def run():
     current_games = get_on_order_games()
-    print(f"Successfully scraped {len(current_games)} titles from library database.")
+    print(f"Successfully tracked {len(current_games)} titles from the library catalogue layout.")
     
     if not current_games:
-        print("Database returned zero entries or request timed out.")
+        print("Could not parse records from the current page content.")
         return
     
     if os.path.exists(TRACKER_FILE):
@@ -59,14 +68,14 @@ def run():
     if new_games:
         message = "🚨 New PS5 Game(s) On Order at OPL!:\n\n" + "\n".join(f"• {game}" for game in new_games)
         send_telegram_message(message)
-        print(f"Sent Telegram update for: {new_games}")
+        print(f"Sent Telegram alert for: {new_games}")
         
-        # Save baseline to list so it won't send repeats
+        # Append found titles to the baseline memory registry
         with open(TRACKER_FILE, "a", encoding="utf-8") as f:
             for game in new_games:
                 f.write(game + "\n")
     else:
-        print("Database sync verified. No new titles to report.")
+        print("Database alignment accurate. No new pre-orders posted.")
 
 if __name__ == "__main__":
     run()
